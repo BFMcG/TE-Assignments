@@ -1,0 +1,771 @@
+---
+title: "Data Bowl TE"
+author: "Brendan McGuinness"
+date: "2024-11-24"
+output: html_document
+---
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(gridExtra)
+library(tidyr)
+library(forcats)
+library(visdat)
+library(tidymodels)
+library(rsample)
+library(vip)
+library(pdp)
+```
+
+
+```{r, eval=FALSE}
+games <- read.csv("/Users/brend/OneDrive/Documents/Data Bowl/games.csv")
+player_play <- read.csv("/Users/brend/OneDrive/Documents/Data Bowl/player_play.csv")
+players <- read.csv("/Users/brend/OneDrive/Documents/Data Bowl/players.csv")
+plays <- read.csv("/Users/brend/OneDrive/Documents/Data Bowl/plays.csv")
+tracking_week_1 <- read.csv("/Users/brend/OneDrive/Documents/Data Bowl/tracking_week_1.csv")
+tracking_week_2 <- read.csv("/Users/brend/OneDrive/Documents/Data Bowl/tracking_week_2.csv")
+tracking_week_3 <- read.csv("/Users/brend/OneDrive/Documents/Data Bowl/tracking_week_3.csv")
+tracking_week_4 <- read.csv("/Users/brend/OneDrive/Documents/Data Bowl/tracking_week_4.csv")
+tracking_week_5 <- read.csv("/Users/brend/OneDrive/Documents/Data Bowl/tracking_week_5.csv")
+tracking_week_6 <- read.csv("/Users/brend/OneDrive/Documents/Data Bowl/tracking_week_6.csv")
+tracking_week_7 <- read.csv("/Users/brend/OneDrive/Documents/Data Bowl/tracking_week_7.csv")
+tracking_week_8 <- read.csv("/Users/brend/OneDrive/Documents/Data Bowl/tracking_week_8.csv")
+tracking_week_9 <- read.csv("/Users/brend/OneDrive/Documents/Data Bowl/tracking_week_9.csv")
+
+# Important game Ids
+# Week 4 Dal/Was - 2022100204
+# Week 6 Beg/Nor - 2022101605
+# Week 7 Bro/Bal - 2022102300
+# Week 9 Gre/Lio - 2022110603
+```
+
+```{r}
+# Getting player information for each relevant position
+players_WR <- players %>% 
+  select(nflId, position, displayName) %>% 
+  filter(position == "WR")
+
+players_RB <- players %>% 
+  select(nflId, position, displayName) %>% 
+  filter(position == "RB")
+
+players_TE <- players %>% 
+  select(nflId, position, displayName) %>% 
+  filter(position == "TE")
+
+players_T <- players %>% 
+  select(nflId, position, displayName) %>% 
+  filter(position == "T")
+
+# Getting player_play information
+player_play_c <- player_play %>% 
+  select(gameId, playId, nflId, hadRushAttempt, inMotionAtBallSnap, shiftSinceLineset, motionSinceLineset, wasRunningRoute, wasTargettedReceiver, routeRan, blockedPlayerNFLId1, blockedPlayerNFLId2, blockedPlayerNFLId3)
+
+# Merging to each player position
+WR_data <- merge(player_play_c, players_WR, by = "nflId")
+RB_data <- merge(player_play_c, players_RB, by = "nflId")
+TE_data <- merge(player_play_c, players_TE, by = "nflId")
+T_data <- merge(player_play_c, players_T, by = "nflId")
+```
+
+```{r}
+# Merging play and game data with TE data
+
+# Selecting appropriate columns
+plays_c <- plays %>% 
+  select(gameId, playId, quarter, down, yardsToGo, possessionTeam, yardlineSide, yardlineNumber, gameClock, preSnapHomeScore, preSnapVisitorScore, offenseFormation, receiverAlignment, passResult, qbSneak, playAction, pff_runPassOption, pff_passCoverage, pff_manZone)
+
+# Getting game information
+games_c <- games %>% 
+  select(gameId, homeTeamAbbr, visitorTeamAbbr)
+
+# plays and games merge
+games_plays <- merge(games_c, plays_c, by = c("gameId"))
+
+# Merging with TE data
+TE_data <- merge(games_plays, TE_data, by = c("gameId", "playId"))
+```
+
+```{r}
+# Using Tracking data
+
+# Getting necessary columns for when the line is set
+tracking_w1_ls <- subset(tracking_week_1, event == "line_set", select = c(gameId, playId, nflId, frameType, x, y, s))
+tracking_w2_ls <- subset(tracking_week_2, event == "line_set", select = c(gameId, playId, nflId, frameType, x, y, s))
+tracking_w3_ls <- subset(tracking_week_3, event == "line_set", select = c(gameId, playId, nflId, frameType, x, y, s))
+tracking_w4_ls <- subset(tracking_week_4, event == "line_set", select = c(gameId, playId, nflId, frameType, x, y, s))
+tracking_w5_ls <- subset(tracking_week_5, event == "line_set", select = c(gameId, playId, nflId, frameType, x, y, s))
+tracking_w6_ls <- subset(tracking_week_6, event == "line_set", select = c(gameId, playId, nflId, frameType, x, y, s))
+tracking_w7_ls <- subset(tracking_week_7, event == "line_set", select = c(gameId, playId, nflId, frameType, x, y, s))
+tracking_w8_ls <- subset(tracking_week_8, event == "line_set", select = c(gameId, playId, nflId, frameType, x, y, s))
+tracking_w9_ls <- subset(tracking_week_9, event == "line_set", select = c(gameId, playId, nflId, frameType, x, y, s))
+
+# Getting necessary columns for when the ball is snapped
+tracking_w1_bs <- subset(tracking_week_1, frameType == "SNAP", select = c(gameId, playId, nflId, frameType, x, y, s, playDirection))
+tracking_w2_bs <- subset(tracking_week_2, frameType == "SNAP", select = c(gameId, playId, nflId, frameType, x, y, s, playDirection))
+tracking_w3_bs <- subset(tracking_week_3, frameType == "SNAP", select = c(gameId, playId, nflId, frameType, x, y, s, playDirection))
+tracking_w4_bs <- subset(tracking_week_4, frameType == "SNAP", select = c(gameId, playId, nflId, frameType, x, y, s, playDirection))
+tracking_w5_bs <- subset(tracking_week_5, frameType == "SNAP", select = c(gameId, playId, nflId, frameType, x, y, s, playDirection))
+tracking_w6_bs <- subset(tracking_week_6, frameType == "SNAP", select = c(gameId, playId, nflId, frameType, x, y, s, playDirection))
+tracking_w7_bs <- subset(tracking_week_7, frameType == "SNAP", select = c(gameId, playId, nflId, frameType, x, y, s, playDirection))
+tracking_w8_bs <- subset(tracking_week_8, frameType == "SNAP", select = c(gameId, playId, nflId, frameType, x, y, s, playDirection))
+tracking_w9_bs <- subset(tracking_week_9, frameType == "SNAP", select = c(gameId, playId, nflId, frameType, x, y, s, playDirection))
+
+# Getting the position information about the ball for every play
+tracking_w1_fb <- subset(tracking_w1_ls, is.na(nflId))
+tracking_w2_fb <- subset(tracking_w2_ls, is.na(nflId))
+tracking_w3_fb <- subset(tracking_w3_ls, is.na(nflId))
+tracking_w4_fb <- subset(tracking_w4_ls, is.na(nflId))
+tracking_w5_fb <- subset(tracking_w5_ls, is.na(nflId))
+tracking_w6_fb <- subset(tracking_w6_ls, is.na(nflId))
+tracking_w7_fb <- subset(tracking_w7_ls, is.na(nflId))
+tracking_w8_fb <- subset(tracking_w8_ls, is.na(nflId))
+tracking_w9_fb <- subset(tracking_w9_ls, is.na(nflId))
+
+#Combining all weeks together
+tracking_players_ls <- bind_rows(tracking_w1_ls, tracking_w2_ls, tracking_w3_ls, tracking_w4_ls, tracking_w5_ls, tracking_w6_ls, tracking_w7_ls, tracking_w8_ls, tracking_w9_ls)
+tracking_players_bs <- bind_rows(tracking_w1_bs, tracking_w2_bs, tracking_w3_bs, tracking_w4_bs, tracking_w5_bs, tracking_w6_bs, tracking_w7_bs, tracking_w8_bs, tracking_w9_bs)
+tracking_ball <- bind_rows(tracking_w1_fb, tracking_w2_fb, tracking_w3_fb, tracking_w4_fb, tracking_w5_fb, tracking_w6_fb, tracking_w7_fb, tracking_w8_fb, tracking_w9_fb)
+
+# Removing nflId NAs (the football) observations from player tracking data
+tracking_players_bs <- subset(tracking_players_bs, !is.na(nflId))
+tracking_players_ls <- subset(tracking_players_ls, !is.na(nflId))
+
+# Changing the names of the variables for players
+
+tracking_players_bs <- tracking_players_bs %>%
+  rename(
+    x_bs = x,
+    y_bs = y,
+    s_bs = s
+  )
+
+# Changing the names of the variables for the football (so it can be differentiated from the players)
+tracking_ball <- tracking_ball %>%
+  rename(
+    x_fb = x,
+    y_fb = y,
+    s_fb = s
+  )
+
+# Changing names of players before motion
+tracking_players_ls <- tracking_players_ls %>% 
+  rename(
+    x_ls = x,
+    y_ls = y,
+    s_ls = s,
+  )
+
+# Merging Tracking Data
+# prep before merge
+tracking_players_bs <- tracking_players_bs %>% 
+  select(-frameType)
+
+tracking_players_ls <- tracking_players_ls %>% 
+  select(-frameType)
+
+tracking_ball <- tracking_ball %>% 
+  select(-c(nflId, frameType))
+
+# merge
+tracking_data <- merge(tracking_players_bs, tracking_players_ls, by = c("gameId", "playId", "nflId"))
+tracking_data <- merge(tracking_data, tracking_ball, by = c("gameId", "playId"))
+
+# Creating Distance from ball columns
+# distance from ball at line set
+tracking_data <- tracking_data %>% 
+  mutate(DistFromBall_LS = round(sqrt((abs(x_ls - x_fb))**2 + (abs(y_ls - y_fb))**2), digits = 2))
+
+# distance from ball at snap
+tracking_data <- tracking_data %>%
+  mutate(DistFromBall_BS = round(sqrt((abs(x_bs - x_fb))**2 + (abs(y_bs - y_fb))**2), digits = 2))
+
+# distance from line of scrimmage
+tracking_data <- tracking_data %>% 
+  mutate(DistFromLOS = round(abs(x_bs - x_fb), digits = 2))
+
+# distance from ball width (y-axis)
+tracking_data <- tracking_data %>% 
+  mutate(DistFromBall_Wid = round(abs(y_bs - y_fb), digits = 2))
+```
+
+```{r}
+# Merging tracking data with positions
+TE_data <- merge(TE_data, tracking_data, by = c("gameId", "playId", "nflId"))
+T_data <- merge(T_data, tracking_data, by = c("gameId", "playId", "nflId"))
+RB_data <- merge(RB_data, tracking_data, by = c("gameId", "playId", "nflId"))
+```
+
+```{r}
+# If the TE lines up on the left or right side of the ball
+
+# First Determine if the TE is facing visitor or home endzone
+TE_data <- TE_data %>% 
+  mutate(Facing = case_when(
+    playDirection == "right" ~ "Visitor",
+    playDirection == "left" ~ "Home"
+  ))
+
+# If we know what direction they're facing we can determine what side of the qb they are by comparing their position to the ball
+TE_data <- TE_data %>%
+ mutate(SideBS = case_when(
+   Facing == "Visitor" ~ 
+     case_when(
+     (y_bs - y_fb) < 0 ~ "Right",
+     (y_bs - y_fb) > 0 ~ "Left"
+     ),
+   Facing == "Home" ~ 
+     case_when(
+     (y_bs - y_fb) < 0 ~ "Left",
+     (y_bs - y_fb) > 0 ~ "Right"
+     ),))
+
+# Also for determining if a Tackle is LT or RT
+
+T_data <- T_data %>% 
+  mutate(Facing = case_when(
+    playDirection == "right" ~ "Visitor",
+    playDirection == "left" ~ "Home"
+  ))
+
+T_data <- T_data %>%
+ mutate(SideBS = case_when(
+   Facing == "Visitor" ~ 
+     case_when(
+     (y_bs - y_fb) < 0 ~ "Right",
+     (y_bs - y_fb) > 0 ~ "Left"
+     ),
+   Facing == "Home" ~ 
+     case_when(
+     (y_bs - y_fb) < 0 ~ "Left",
+     (y_bs - y_fb) > 0 ~ "Right"
+     ),))
+   
+T_data <- T_data %>%
+ mutate(TacklePos = case_when(
+   SideBS == "Right" ~ "RT",
+   SideBS == "Left" ~ "LT"
+   ))
+```
+
+```{r}
+# Dealing with T duplicates
+
+T_data <- T_data %>% 
+  mutate(super_key = paste(gameId, playId, sep = ""))
+
+T_data <- T_data %>%
+  group_by(super_key) %>%
+  mutate(NumberofT = n()) %>% 
+  ungroup()
+
+# Take away all observations where there is only one tackle (no way to know who the other tackle is)
+
+T_data <- T_data %>% 
+  filter(!(NumberofT == 1))
+
+# If there are more than 3 tackles on a play, look at the tackles that share a side, the tackle with the largest DistFromBall_Wid is kept. There should only be two tackles for every duplication
+
+# freq represents how many T are on the same side. 
+
+T_data <- T_data %>% 
+  group_by(super_key, SideBS) %>% 
+  mutate(freq = n()) %>% 
+  ungroup()
+
+#If the freq equals that number of T that are on the play, then there are no tackles on the other side of the ball, meaning we must drop these observations
+T_data <- T_data %>% 
+  filter(!(freq == NumberofT))
+
+# If freq is greater than 1, then there are too many tackles on the play and we need to decide which tackles to keep and which to get rid of
+# The tackle with the largest distance from the ball is kept because that is the tackle that would be closest to the TE.
+
+T_data <- T_data %>% 
+  group_by(super_key, SideBS) %>%
+  mutate(TackleDistRank = dense_rank(DistFromBall_Wid)) %>% 
+  mutate(InTacklePos = case_when(
+    freq > 1 & TackleDistRank == 2 & freq != 3 ~ "yes",
+    freq > 1 & TackleDistRank == 3 ~ "yes",
+    TRUE ~ "no"
+  )) %>% 
+  ungroup()
+
+# dropping observations that aren't set up as tackles (InTacklePos is "no")
+T_data <- T_data %>% 
+  filter(!(freq > 1 & InTacklePos == "no"))
+```
+
+```{r}
+# Setting up data for merge
+T_data <- T_data %>% 
+  rename(DistFromBall_Tackle = DistFromBall_Wid) %>% 
+  rename(LOS_Tackle = DistFromLOS) %>% 
+  select(gameId, playId, SideBS, TacklePos, LOS_Tackle, DistFromBall_Tackle)
+```
+
+
+```{r}
+# How to determine if a TE is in a TE position or not?
+
+# First, if the TE is close to within 2 yards of the Tackle, then they will be considered a TE
+# In order to do this we must merge TE and Tackle data
+
+TE_data <- merge(TE_data, T_data, by = c("gameId", "playId", "SideBS"))
+
+TE_data <- TE_data %>% 
+  relocate(SideBS, .after = Facing)
+
+# If the TE is closer to the ball width wise than the outside tackle then they are set up as a FB, not a TE. I don't want to be analyzing TE when they are in this position. SO I'm removing them from the data set
+TE_data <- TE_data %>% 
+  filter(!(DistFromBall_Wid < DistFromBall_Tackle))
+
+# Determining if there are multiple TEs on a play
+# Creating a super key so it's easier to tell if there are observations that have matching game ids and play ids
+TE_data <- TE_data %>% 
+  mutate(super_key = paste(gameId, playId, sep = ""))
+
+# Making a new variable where if super_keys match, then there are multiple TE on the play
+TE_data <- TE_data %>% 
+  mutate(multipleTE = duplicated(super_key) | duplicated(super_key, fromLast = TRUE))
+
+# Creating number of TE on the play
+# What rank they are (1 is closest to ball 3 is furthest)
+# What the previous rank TE position is
+# What the side of the ball the previous rank TEs are
+TE_data <- TE_data %>%
+  group_by(super_key) %>%
+  mutate(
+    NumberofTE = n(),
+    TErank = dense_rank(DistFromBall_Wid),
+    DistTE1 = lag(DistFromBall_Wid, n = 2, order_by = TErank),
+    DistTE2 = lag(DistFromBall_Wid, order_by = TErank),
+    SideTE1 = lag(SideBS, n = 2, order_by = TErank),
+    SideTE2 = lag(SideBS, order_by = TErank)
+  ) %>%
+  ungroup()
+
+
+
+# Looking at distance that are from the ball width wise, and how many TE are on the field
+# If 1 TE, distance must be less than 2 yards from Tackle
+# If 2 TE, the TE with the greater distance from the ball (TE 2) must be within two yards of another TE or the Tackle.
+# If 3 TE, same rules apply, but the furthest TE is (TE 3) if there are 3 TEs on the same side, then TE #3 must be less than 2 yards from TE #2
+
+# TEo: if lined up as the outside most TE
+# TEi: if one TE is lined up on the outside of them
+# TEii: if two TEs are lined up on the outside of them
+
+# Determining if 3rd TE is in correct position
+TE_data <- TE_data %>% 
+  mutate(TEposition = case_when(
+    TErank == 3 & 
+      (SideBS == SideTE1) &
+      (DistFromBall_Wid - DistTE1) < 2 ~ "TEo", # TE 3, same side as TE 1, test to see if close enough to be TE
+    TErank == 3 & 
+      (SideBS == SideTE2) &
+      (DistFromBall_Wid - DistTE2) < 2 ~ "TEo", # TE 3, same side as TE 2, test to see if close enough to be TE
+    TErank == 3 &
+      (SideBS != SideTE1 & SideBS != SideTE2) &
+      (DistFromBall_Wid - DistFromBall_Tackle) < 2 ~ "TEo", # TE 3, not on the same side of either TE, test to see if close enough to Tackle
+    TErank == 3 ~ "Not TE"
+  ))
+
+# Saving if TE3 is a TE or not, so I can determine what position TE2 should be in
+TE_data <- TE_data %>% 
+  group_by(super_key) %>% 
+  mutate(
+    PosTE3 = lead(TEposition, order_by = TErank),
+    SideTE3 = lead(SideBS, order_by = TErank),
+    SideTE1 = lag(SideBS, order_by = TErank),
+    DistTE1 = lag(DistFromBall_Wid, order_by = TErank)
+    ) %>% 
+  ungroup()
+
+# Determining if 2nd TE is in correct position
+TE_data <- TE_data %>% 
+  mutate(TEposition = case_when(
+    TErank == 2 &
+      (PosTE3 == "TEo") &
+      (SideBS == SideTE3) ~ "TEi",
+    TErank == 2 &
+      (PosTE3 == "TEo") &
+      (SideBS != SideTE1 & SideBS != SideTE3) &
+      (DistFromBall_Wid - DistFromBall_Tackle) < 2 ~ "TEo",
+    TErank == 2 &
+      (PosTE3 == "Not TE" | is.na(PosTE3)) &
+      (SideBS == SideTE1) &
+      (DistFromBall_Wid - DistTE1) < 2 ~ "TEo",
+    TErank == 2 &
+      (PosTE3 == "Not TE" | is.na(PosTE3)) &
+      (SideBS != SideTE1) &
+      (DistFromBall_Wid - DistFromBall_Tackle) < 2 ~ "TEo",
+    TErank == 2 &
+      (SideBS == SideTE1) &
+      (DistFromBall_Wid - DistTE1) < 2 ~ "TEo",
+    TErank == 2 ~ "Not TE",
+    TRUE ~ TEposition
+    ))
+
+# Saving if TE2 is a TE or not, so I can determine what position TE1 should be in
+TE_data <- TE_data %>% 
+  group_by(super_key) %>% 
+  mutate(
+    PosTE2 = lead(TEposition, order_by = TErank),
+    SideTE2 = lead(SideBS, order_by = TErank),
+    PosTE3 = lead(TEposition, n = 2, order_by = TErank),
+    SideTE3 = lead(SideBS, n = 2, order_by = TErank)) %>% 
+  ungroup()
+
+# Determining if 1st TE is in correct position
+TE_data <- TE_data %>% 
+  mutate(TEposition = case_when(
+    TErank == 1 &
+      (PosTE3 == "TEo" & PosTE2 == "TEi") &
+      (SideBS == SideTE3 & SideBS == SideTE3) ~ "TEii",
+    TErank == 1 &
+      (PosTE3 == "Not TE" | is.na(PosTE3)) &
+      (PosTE2 == "TEo") &
+      (SideBS == SideTE2) ~ "TEi",
+    TErank == 1 &
+      (PosTE3 == "TEo" & PosTE2 == "TEo") ~ "TEi",
+    TErank == 1 &
+      (PosTE3 == "TEo" & PosTE2 == "TEi") &
+      (SideBS != SideTE3 & SideBS != SideTE3) &
+      (DistFromBall_Wid - DistFromBall_Tackle) < 2  ~ "TEo",
+    TErank == 1 &
+      (PosTE3 == "Not TE" | is.na(PosTE3)) &
+      (SideBS != SideTE2) &
+      (DistFromBall_Wid - DistFromBall_Tackle) < 2  ~ "TEo",
+    TErank == 1 &
+      (PosTE3 == "Not TE" | is.na(PosTE3)) &
+      (PosTE2 == "Not TE" | is.na(PosTE2)) &
+      (DistFromBall_Wid - DistFromBall_Tackle) < 2  ~ "TEo",
+    TErank == 1 ~ "Not TE",
+    TRUE ~ TEposition
+  ))
+
+# Removing unnessicary variables
+TE_data <- TE_data %>% 
+  select(-c(blockedPlayerNFLId2, blockedPlayerNFLId3, TErank, DistTE1, DistTE2, SideTE1, SideTE2, SideTE3, PosTE3, PosTE2))
+```
+
+```{r}
+# How to determine if a TE was running a route or blocking?
+
+# 1) if the play is a designed rush, label: Block
+# 2) if the TE was running a route (wasRunningRoute == 1), label: Route
+# 3) if the TE didn't run a route and was recorded blocking a player, label: Block
+
+# Cleaning passResult so it will tell if the play was designed to be a pass or a rush
+TE_data <- TE_data %>% 
+  rename(playDesign = passResult) %>% 
+  mutate(playDesign = case_when(
+    playDesign == "" ~ "Rush",
+    TRUE ~ "Pass"
+  ))
+
+
+# I understand that NA values mean that we can't be sure that there was an action taken place, for example if wasRunningRoute has an NA value that doesn't mean a route wasn't ran. But, for the sake of organizing my data I will label these values as 0 for now. I will categorize the NA values later.
+
+# Converting significant NA values to 0
+TE_data$blockedPlayerNFLId1[is.na(TE_data$blockedPlayerNFLId1)] <- 0
+TE_data$wasRunningRoute[is.na(TE_data$wasRunningRoute)] <- 0
+
+# Creating initial TE assignments
+TE_data <- TE_data%>%
+  mutate(TEassignment = case_when(
+    playDesign == "Rush" ~ "Block",
+    wasRunningRoute == 1 ~ "Route",
+    blockedPlayerNFLId1 > 0 ~ "Block",
+    TRUE ~ "Other"
+  ))
+
+# Since there are only 730 observations that don't fit into either block or route, I'm going to drop them from the dataset
+
+TE_data <- TE_data %>% 
+  filter(!(TEassignment == "Other"))
+```
+
+```{r}
+# Creating total yards to go variable
+
+TE_data <- TE_data %>%
+  mutate(totalYardsToGo = case_when(
+    yardlineNumber == 50 ~ 50,
+    possessionTeam == yardlineSide ~ (100 - yardlineNumber),
+    TRUE ~ yardlineNumber
+  ))
+
+# Creating if a team is in the redzone
+TE_data <- TE_data %>%
+  mutate(redZone = case_when(
+    totalYardsToGo <= 20 ~ TRUE,
+    TRUE ~ FALSE
+  ))
+```
+
+```{r}
+# Creating variable for possessionTeamScore and oppTeamScore, and ScoreDiff
+TE_data <- TE_data %>%
+  mutate(
+    possTeamScore = if_else(possessionTeam == homeTeamAbbr, preSnapHomeScore, preSnapVisitorScore),
+    oppTeamScore = if_else(possessionTeam == homeTeamAbbr, preSnapVisitorScore, preSnapHomeScore)
+  )
+
+# Creating Variable for score differential
+# If negative the poss team is behind, if positive the poss team is ahead
+TE_data$scoreDiff <- TE_data$possTeamScore - TE_data$oppTeamScore
+```
+
+```{r}
+# Converting time to readable interval
+TE_data <- TE_data %>%
+  mutate(gameTime = gameClock) %>% 
+  separate(gameClock, into = c("minutes", "seconds"), sep = ":", convert = TRUE) %>% 
+  mutate(seconds = round((seconds/60), 2)) %>% 
+  mutate(gameClock = minutes + seconds)
+```
+
+```{r}
+# Determining if the TE is on the LOS or not
+
+TE_data <- TE_data %>% 
+  mutate(OnLOS = case_when(
+    DistFromLOS > 1.5 ~ FALSE,
+    DistFromLOS < LOS_Tackle ~ TRUE,
+    (DistFromLOS - LOS_Tackle) <= 0.2 ~ TRUE,
+    DistFromLOS < 1 ~ TRUE,
+    TRUE ~ FALSE
+  ))
+
+ggplot(data = TE_data, aes(x = OnLOS)) +
+  geom_bar()
+```
+
+# Missingness
+
+```{r}
+TE_data_c <- TE_data %>% 
+  select(-c(yardlineSide, homeTeamAbbr, visitorTeamAbbr, yardlineNumber, minutes, seconds, preSnapHomeScore, preSnapVisitorScore, qbSneak, playAction, pff_runPassOption, hadRushAttempt, wasRunningRoute, wasTargettedReceiver, routeRan, blockedPlayerNFLId1, playDirection, Facing, super_key, gameTime, possTeamScore, oppTeamScore))
+
+TE_data_c %>% vis_miss()
+```
+
+```{r}
+# Offensive formation and Receiver allignment
+
+# For Offensive formation if it is labeled as Jumbo, Wildcat, or NA (formations with the least obs). I will label the formation as "OTHER"
+# This will take care of the NA values
+
+TE_data_c <- TE_data_c %>% 
+  mutate(offenseFormation = case_when(
+    is.na(offenseFormation) ~ "OTHER",
+    offenseFormation == "JUMBO" |
+    offenseFormation == "WILDCAT" ~ "OTHER",
+    TRUE ~ offenseFormation
+  ))
+
+# For Receiver alignment if it is labeled as 3x0, 1x0, 1x1, 2x0, 4x1, NA (alignments with the least obs). I will label the alignment as "OTHER"
+
+TE_data_c <- TE_data_c %>% 
+  mutate(receiverAlignment = case_when(
+    is.na(receiverAlignment) ~ "OTHER",
+    receiverAlignment == "1x0" |
+    receiverAlignment == "1x1" |
+    receiverAlignment == "2x0" | 
+    receiverAlignment == "3x0" |
+    receiverAlignment == "4x1" ~ "OTHER",
+    TRUE ~ receiverAlignment
+  ))
+```
+
+```{r}
+# pff_passCoverage and pff_manZone
+
+# Combine:
+# Cover-1 Double -> Cover-1
+# all Cover-3 variations -> Cover-3
+# Cover-6 left and right -> Cover-6
+# 2-man, Bracket, Miscellaneous, prevent, NA -> "Other"
+
+TE_data_c <- TE_data_c %>% 
+  mutate(pff_passCoverage = case_when(
+    pff_passCoverage == "Cover-1 Double" ~ "Cover-1",
+    pff_passCoverage == "Cover-3 Cloud Left" |
+    pff_passCoverage == "Cover-3 Cloud Right" |
+    pff_passCoverage == "Cover-3 Double Cloud" |
+    pff_passCoverage == "Cover-3 Seam" ~ "Cover-3",
+    pff_passCoverage == "Cover 6-Left" |
+    pff_passCoverage == "Cover-6 Right" ~ "Cover-6",
+    is.na(pff_passCoverage) |
+    pff_passCoverage == "2-Man" |
+    pff_passCoverage == "Bracket" |
+    pff_passCoverage == "Miscellaneous" |
+    pff_passCoverage == "Prevent" ~ "Other",
+    TRUE ~ pff_passCoverage
+  ))
+
+# pff_manZone has almost zero effect on the outcome (TE assignment), so I'm removing it from the data set
+
+ggplot(data = TE_data_c, aes(x = pff_manZone, fill = factor(TEassignment))) +
+  geom_bar(position = "fill")
+
+TE_data_c <- TE_data_c %>% 
+  select(-pff_manZone)
+
+# Graphs
+
+ggplot(data = TE_data_c, aes(x = pff_passCoverage, fill = TEassignment)) +
+  geom_bar() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+ggplot(data = TE_data_c, aes(x = pff_passCoverage, fill = factor(TEassignment))) +
+  geom_bar(position = "fill") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+```{r}
+# Shifts and motion
+
+# I'm going to be combining motion and shift into one column that will be true if there was any kind of movement by the TE
+# I'm doing thie because there's no way to tell the difference between a shift and a motion just using the data from TEs, I would have to use the tracking data of almost every player in every play. Furthermore, I don't believe there would be a significant enough difference between motion and a shift in determing the TE assignment outcome
+
+TE_data_c <- TE_data_c %>% 
+  mutate(MotionorShift = case_when(
+    shiftSinceLineset == TRUE | motionSinceLineset == TRUE ~ TRUE,
+    is.na(shiftSinceLineset) | is.na(motionSinceLineset) ~ NA,
+    TRUE ~ FALSE
+  ))
+
+TE_data_c <- TE_data_c %>% 
+  mutate(y_chg = abs(y_bs - y_ls))
+
+ggplot(data = TE_data_c, aes(x = y_chg, fill = MotionorShift)) +
+  geom_density(alpha = 0.5) +
+  geom_vline(xintercept = 0.135, linetype = "dashed", color = "red") +
+  xlim(0,1)
+
+# Ratio of TRUE and FALSE 2349/6619
+
+# The densities meet at ~0.135 meaning if the change of their position on the LOS is less than 0.13, there likely was no movement. But, if their position on the LOS is 0.13 or more, their likely was some movement from the TE.
+
+TE_data_c <- TE_data_c %>% 
+  mutate(MotionorShift = case_when(
+    is.na(MotionorShift) & y_chg < 0.13 ~ FALSE,
+    is.na(MotionorShift) ~ TRUE,
+    TRUE ~ MotionorShift
+  ))
+
+ggplot(data = TE_data_c, aes(x = y_chg, fill = MotionorShift)) +
+  geom_density(alpha = 0.5) +
+  geom_vline(xintercept = 0.135, linetype = "dashed", color = "red") +
+  xlim(0,1)
+
+TE_data_c <- TE_data_c %>% 
+  select(-c(shiftSinceLineset, motionSinceLineset))
+```
+
+
+```{r}
+# In motion
+
+ggplot(data = TE_data_c, aes(x = s_bs, fill = inMotionAtBallSnap)) +
+  geom_density(alpha = 0.5) +
+  geom_vline(xintercept = 0.255, linetype = "dashed", color = "red") +
+  xlim(0,1)
+
+# Based on this graph where the densities intersect is the best point for deciding whether a TE is in motion at the ball snap or not, which is when s_bs is approximately 0.255. When s_bs <= 0.25 the TE likely isn't in motion, but if s_bs > 0.25 the TE likely is in some sort of motion. Also, if the TE has a FALSE value for 'MotionorShift' then we will automatically assume they are not in motion.
+
+TE_data_c <- TE_data_c %>% 
+  mutate(inMotionAtBallSnap = case_when(
+    is.na(inMotionAtBallSnap) & s_bs <= 0.25 ~ FALSE,
+    is.na(inMotionAtBallSnap) ~ TRUE,
+    TRUE ~ inMotionAtBallSnap
+  ))
+
+ggplot(data = TE_data_c, aes(x = s_bs, fill = inMotionAtBallSnap)) +
+  geom_density(alpha = 0.5) +
+  geom_vline(xintercept = 0.255, linetype = "dashed", color = "red") +
+  xlim(0,1)
+```
+
+```{r}
+TE_data_c %>% vis_miss()
+```
+
+
+
+
+
+
+
+
+```{r}
+# Analyzing Lions vs Green Bay other assignments
+
+TE_data %>% 
+  filter(gameId == "2022110603") %>% 
+  select(quarter, gameTime, NumberofTE, TEposition, LOS_Tackle, DistFromLOS, OnLOS) %>% 
+  arrange(quarter, desc(gameTime))
+
+TE_data %>% 
+  filter(gameId == "2022110603") %>% 
+  arrange(quarter, desc(gameClock))
+
+TE_data %>% 
+  filter(gameId == "2022100204" & playId == "827" & nflId == "41349	")
+```
+
+```{r}
+# Cleaning RB data
+
+# collecting if a RB got a hand off or not
+RB_rush <- RB_data %>%
+  rename(RBrush = hadRushAttempt) %>% 
+  rename(DistFromballRB_BS = DistFromBall_BS) %>% 
+  select(gameId, playId, RBrush, DistFromballRB_BS)
+
+# Looking for plays where there are two RB 
+RB_rush <- RB_rush %>% 
+  arrange(gameId, playId) %>% 
+  group_by(gameId, playId) %>% 
+  mutate(NumberofRB = n()) %>% 
+  ungroup()
+
+# Making a variable that will say if there was a rush for more than 2 RBs and who was the furthest distance from the ball 
+RB_rush <- RB_rush %>% 
+  group_by(gameId, playId) %>% 
+  mutate(Rushplay = case_when(
+    NumberofRB == 2 & lead(RBrush == 1) ~ "yes",
+    NumberofRB == 2 & lag(RBrush == 1) ~ "yes",
+    NumberofRB == 2 & RBrush == 1 ~ "yes",
+    RBrush == 1 ~ "yes",
+    TRUE ~ "no"
+  )) %>% 
+  mutate(Balldist = case_when(
+    NumberofRB == 2 & (lead(DistFromballRB_BS) > DistFromballRB_BS) ~ "close",
+    NumberofRB == 2 & (lag(DistFromballRB_BS) >= DistFromballRB_BS) ~ "close",
+    TRUE ~ "far"
+  )) %>% 
+  ungroup()
+
+# If there are two RB, and one has a rush, drop the one that didn't rush. If both RBs didn't rush, take away the one with the shortest distance.
+# Also drop observations where there are 3 RBs
+RB_rush <- RB_rush %>% 
+  filter(!(Rushplay == "yes" & RBrush == 0)) %>% 
+  filter(!(Balldist == "close")) %>% 
+  filter(!(NumberofRB == 3)) %>% 
+  select(gameId, playId, RBrush, DistFromballRB_BS)
+```
+
+```{r}
+#RB distances for later
+
+TE_data <- merge(TE_data, RB_rush, by = c("gameId", "playId"), all.x = TRUE, all.y = FALSE)
+```
+
+
+
+
